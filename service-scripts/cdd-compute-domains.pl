@@ -22,18 +22,26 @@ if (! -f "$cdd_data/Cdd.pn")
 
 my $cs = Bio::KBase::CDMI::Client->new();
 
-while (defined(my $prot_id = <>))
-{
-    chomp $prot_id;
+my @prots = <>;
+chomp @prots;
 
-    my $seq = $cs->get_entity_ProteinSequence([$prot_id], ['sequence']);
-    $seq = $seq->{$prot_id};
-    next unless ref($seq);
-    $seq = ">$prot_id\n$seq->{sequence}\n";
+while (@prots)
+{
+    my @protbatch = splice(@prots, 0, 2000);
+
+    my $seqs = $cs->get_entity_ProteinSequence(\@protbatch, ['sequence']);
+    
+    my $input;
+    for my $prot_id (@protbatch)
+    {
+	my $seq = $seqs->{$prot_id};
+	next unless ref($seq) && $seq->{sequence};
+	$input .= ">$prot_id\n" . $seq->{sequence} . "\n";
+    }
 
     my @cmd = ('rpsblast', "-d", "$cdd_data/Cdd", "-F", "T", "-e", "0.01", "-m", "9");
     my $output;
-    run \@cmd, '<', \$seq, '>', \$output;
+    run \@cmd, '<', \$input, '>', \$output;
     
     for my $l (split(/\n/, $output))
     {

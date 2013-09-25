@@ -28,7 +28,7 @@ TPAGE_ARGS = --define kb_top=$(TARGET) --define kb_runtime=$(DEPLOY_RUNTIME) --d
 
 default: bin
 
-bin: $(BIN_PERL)
+bin: $(BIN_PERL) $(BIN_SERVICE_PERL)
 #bin: build-libs $(BIN_PERL)
 
 # Test Section
@@ -124,6 +124,12 @@ build-libs: Makefile
 		--scripts scripts \
 		--url $(SERVICE_URL) \
 		$(SERVICE_SPEC) lib
+
+$(BIN_DIR)/%: service-scripts/%.pl $(TOP_DIR)/user-env.sh
+	$(WRAP_PERL_SCRIPT) '$$KB_TOP/modules/$(CURRENT_DIR)/$<' $@
+
+$(BIN_DIR)/%: service-scripts/%.py $(TOP_DIR)/user-env.sh
+	$(WRAP_PYTHON_SCRIPT) '$$KB_TOP/modules/$(CURRENT_DIR)/$<' $@
 
 include $(TOP_DIR)/tools/Makefile.common.rules
 
