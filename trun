@@ -1,0 +1,19 @@
+use Data::Dumper;
+use Bio::KBase::ConservedDomainSearch::Util;
+use strict;
+use gjoseqlib;
+use JSON::XS;
+
+my $u = Bio::KBase::ConservedDomainSearch::Util->new("/scratch/olson/cdd");
+
+my @dat;
+
+while (my($id, $def, $seq) = read_next_fasta_seq(\*STDIN))
+{
+    push(@dat, [$id, $seq]);
+}
+
+my $ret = $u->process_protein_tuples(\@dat);
+   
+my $json = JSON::XS->new->pretty(1);
+print $json->encode($ret);

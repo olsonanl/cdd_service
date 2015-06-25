@@ -7,7 +7,7 @@ TARGET ?= /kb/deployment
 SERVICE_SPEC = ConservedDomainSearch.spec
 SERVICE_NAME = ConservedDomainSearch
 SERVICE_PORT = 7056
-SERVICE_URL = http://10.0.16.184:$(SERVICE_PORT)
+SERVICE_URL = http://localhost/$(SERVICE_PORT)
 
 SERVICE_DIR = conserved_domain_search
 SERVICE_SUBDIRS = webroot bin
@@ -28,8 +28,7 @@ TPAGE_ARGS = --define kb_top=$(TARGET) --define kb_runtime=$(DEPLOY_RUNTIME) --d
 
 default: bin
 
-bin: $(BIN_PERL) $(BIN_SERVICE_PERL)
-#bin: build-libs $(BIN_PERL)
+bin: build-libs $(BIN_PERL) $(BIN_SERVICE_PERL)
 
 # Test Section
 
