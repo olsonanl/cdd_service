@@ -16,6 +16,23 @@ ConservedDomainSearch
 =cut
 
 #BEGIN_HEADER
+use Bio::KBase::ConservedDomainSearch::Util;
+use Bio::KBase::DeploymentConfig;
+use CHI;
+use CHI::Constants qw(CHI_Max_Time);
+use Digest::MD5 'md5_hex';
+use Data::Dumper;
+
+sub _has_cached
+{
+    my($self, $md5) = @_;
+    if ($self->{cache})
+    {
+	return $self->{cache}->is_valid($md5);
+    }
+    return undef;
+}
+
 #END_HEADER
 
 sub new
@@ -25,6 +42,28 @@ sub new
     };
     bless $self, $class;
     #BEGIN_CONSTRUCTOR
+
+    my $cfg = Bio::KBase::DeploymentConfig->new($ENV{KB_SERVICE_NAME} || "ConservedDomainSearch");
+
+    my $cdd_data = $cfg->setting("cdd-data");
+    $cdd_data or die "ConservedDomainSearch: cdd-data must be set";
+    -d $cdd_data or die  "ConservedDomainSearch: cdd-data setting $cdd_data is not a directory";
+
+    my $util = Bio::KBase::ConservedDomainSearch::Util->new($cdd_data);
+    $self->{util} = $util;
+
+    my $cache_dir = $cfg->setting("cache-dir");
+    $self->{cache_dir} = $cache_dir;
+
+    if ($cache_dir)
+    {
+	my $cache = CHI->new(driver => 'File',
+			     compress_threshold => 50_000,
+			     root_dir => $cache_dir,
+			     expires_at => CHI_Max_Time);
+	$self->{cache} = $cache;
+    }
+    
     #END_CONSTRUCTOR
 
     if ($self->can('_init_instance'))
@@ -40,7 +79,7 @@ sub new
 
 =head2 cdd_lookup
 
-  $result = $obj->cdd_lookup($prots)
+  $result = $obj->cdd_lookup($prots, $options)
 
 =over 4
 
@@ -50,11 +89,18 @@ sub new
 
 <pre>
 $prots is a reference to a list where each element is a protein_sequence
+$options is a cdd_lookup_options
 $result is a reference to a hash where the key is a string and the value is a cdd_result
-protein_sequence is a reference to a list containing 2 items:
+protein_sequence is a reference to a list containing 3 items:
 	0: (id) a string
-	1: (protein) a string
+	1: (md5) a string
+	2: (protein) a string
+cdd_lookup_options is a reference to a hash where the following keys are defined:
+	data_mode has a value which is a string
+	evalue_cutoff has a value which is a float
 cdd_result is a reference to a hash where the following keys are defined:
+	md5sum has a value which is a string
+	len has a value which is an int
 	domain_hits has a value which is a reference to a list where each element is a domain_hit
 	site_annotations has a value which is a reference to a list where each element is a site_annotation
 	structural_motifs has a value which is a reference to a list where each element is a structural_motif
@@ -89,11 +135,18 @@ structural_motif is a reference to a list containing 4 items:
 =begin text
 
 $prots is a reference to a list where each element is a protein_sequence
+$options is a cdd_lookup_options
 $result is a reference to a hash where the key is a string and the value is a cdd_result
-protein_sequence is a reference to a list containing 2 items:
+protein_sequence is a reference to a list containing 3 items:
 	0: (id) a string
-	1: (protein) a string
+	1: (md5) a string
+	2: (protein) a string
+cdd_lookup_options is a reference to a hash where the following keys are defined:
+	data_mode has a value which is a string
+	evalue_cutoff has a value which is a float
 cdd_result is a reference to a hash where the following keys are defined:
+	md5sum has a value which is a string
+	len has a value which is an int
 	domain_hits has a value which is a reference to a list where each element is a domain_hit
 	site_annotations has a value which is a reference to a list where each element is a site_annotation
 	structural_motifs has a value which is a reference to a list where each element is a structural_motif
@@ -137,10 +190,11 @@ structural_motif is a reference to a list containing 4 items:
 sub cdd_lookup
 {
     my $self = shift;
-    my($prots) = @_;
+    my($prots, $options) = @_;
 
     my @_bad_arguments;
     (ref($prots) eq 'ARRAY') or push(@_bad_arguments, "Invalid type for argument \"prots\" (value was \"$prots\")");
+    (ref($options) eq 'HASH') or push(@_bad_arguments, "Invalid type for argument \"options\" (value was \"$options\")");
     if (@_bad_arguments) {
 	my $msg = "Invalid arguments passed to cdd_lookup:\n" . join("", map { "\t$_\n" } @_bad_arguments);
 	Bio::KBase::Exceptions::ArgumentValidationError->throw(error => $msg,
@@ -150,6 +204,99 @@ sub cdd_lookup
     my $ctx = $Bio::KBase::ConservedDomainSearch::Service::CallContext;
     my($result);
     #BEGIN cdd_lookup
+
+    #
+    # Begin by computing md5 for each protein and determining if the value is in the
+    # cache. If an md5 is provided, trust it.
+    #
+    # We also cache the parsed output, at least those retrieved with
+    # a default (non-specified) evalue cutoff.
+    #
+
+    my $cache = $self->{cache};
+    my @to_compute;
+    my %md5_to_id;
+
+    $options->{data_mode} ||= 'std';
+    my $data_mode= $options->{data_mode};
+
+    $result = {};
+
+    for my $ent (@$prots)
+    {
+	my($id, $md5, $seq) = @$ent;
+	if (!$md5)
+	{
+	    $md5 = md5_hex(uc($seq));
+	    $ent->[1] = $md5;
+	}
+
+	next unless $cache;
+
+	my $dmkey = "$md5-$data_mode";
+
+	my $val = $cache->get($dmkey);
+
+	if ($val)
+	{
+	    $result->{$id} = $val;
+	    next;
+	}
+
+	$val = $cache->get($md5);
+	if ($val)
+	{
+	    print "Found $id $md5\n";
+	    my $r1 = $self->{util}->postproc_xml($val, $options);
+	    $result->{$id} = $r1->{$md5};
+	    $cache->set($dmkey, $r1->{$md5});
+	}
+	else
+	{
+	    if (!exists($md5_to_id{$md5}))
+	    {
+		print "compute $id $md5\n";
+		push(@to_compute, [$md5, undef, $seq]);
+	    }
+	    else
+	    {
+		print "Already computing $md5 ($id)\n";
+	    }
+	    push(@{$md5_to_id{$md5}}, $id);
+	}
+    }
+
+    #
+    # Now compute the ones that need computing. XML is returned in a File::Temp tempfile;
+    #
+
+    if (@to_compute && !$options->{cached_only})
+    {
+	my $temp_out = $self->{util}->process_protein_tuples(\@to_compute);
+	
+	#
+	# Split and cache.
+	#
+	
+	$self->{util}->split_postproc_xml($temp_out, sub {
+	    my($md5, $node) = @_;
+	    my $txt = $node->toString();
+	    my $r1 = $self->{util}->postproc_xml($txt, $options);
+
+	    if ($cache)
+	    {
+		my $dmkey = "$md5-$data_mode";
+		print "Cache $md5\n";
+		$cache->set($md5, $txt);
+		$cache->set($dmkey, $r1->{$md5});
+	    }
+	    for my $id (@{$md5_to_id{$md5}})
+	    {
+		$result->{$id} = $r1->{$md5};
+	    }
+	});
+    }
+    
     #END cdd_lookup
     my @_bad_returns;
     (ref($result) eq 'HASH') or push(@_bad_returns, "Invalid type for return variable \"result\" (value was \"$result\")");
@@ -159,6 +306,62 @@ sub cdd_lookup
 							       method_name => 'cdd_lookup');
     }
     return($result);
+}
+
+
+
+
+=head2 cache_add
+
+  $obj->cache_add($xml_document)
+
+=over 4
+
+=item Parameter and return types
+
+=begin html
+
+<pre>
+$xml_document is a string
+
+</pre>
+
+=end html
+
+=begin text
+
+$xml_document is a string
+
+
+=end text
+
+
+
+=item Description
+
+
+
+=back
+
+=cut
+
+sub cache_add
+{
+    my $self = shift;
+    my($xml_document) = @_;
+
+    my @_bad_arguments;
+    (!ref($xml_document)) or push(@_bad_arguments, "Invalid type for argument \"xml_document\" (value was \"$xml_document\")");
+    if (@_bad_arguments) {
+	my $msg = "Invalid arguments passed to cache_add:\n" . join("", map { "\t$_\n" } @_bad_arguments);
+	Bio::KBase::Exceptions::ArgumentValidationError->throw(error => $msg,
+							       method_name => 'cache_add');
+    }
+
+    my $ctx = $Bio::KBase::ConservedDomainSearch::Service::CallContext;
+    #BEGIN cache_add
+    #END cache_add
+    return();
 }
 
 
@@ -338,6 +541,8 @@ a reference to a list containing 4 items:
 
 <pre>
 a reference to a hash where the following keys are defined:
+md5sum has a value which is a string
+len has a value which is an int
 domain_hits has a value which is a reference to a list where each element is a domain_hit
 site_annotations has a value which is a reference to a list where each element is a site_annotation
 structural_motifs has a value which is a reference to a list where each element is a structural_motif
@@ -349,6 +554,8 @@ structural_motifs has a value which is a reference to a list where each element 
 =begin text
 
 a reference to a hash where the following keys are defined:
+md5sum has a value which is a string
+len has a value which is an int
 domain_hits has a value which is a reference to a list where each element is a domain_hit
 site_annotations has a value which is a reference to a list where each element is a site_annotation
 structural_motifs has a value which is a reference to a list where each element is a structural_motif
@@ -371,9 +578,10 @@ structural_motifs has a value which is a reference to a list where each element 
 =begin html
 
 <pre>
-a reference to a list containing 2 items:
+a reference to a list containing 3 items:
 0: (id) a string
-1: (protein) a string
+1: (md5) a string
+2: (protein) a string
 
 </pre>
 
@@ -381,9 +589,47 @@ a reference to a list containing 2 items:
 
 =begin text
 
-a reference to a list containing 2 items:
+a reference to a list containing 3 items:
 0: (id) a string
-1: (protein) a string
+1: (md5) a string
+2: (protein) a string
+
+
+=end text
+
+=back
+
+
+
+=head2 cdd_lookup_options
+
+=over 4
+
+
+
+=item Description
+
+Defaults to 0.01.
+
+
+=item Definition
+
+=begin html
+
+<pre>
+a reference to a hash where the following keys are defined:
+data_mode has a value which is a string
+evalue_cutoff has a value which is a float
+
+</pre>
+
+=end html
+
+=begin text
+
+a reference to a hash where the following keys are defined:
+data_mode has a value which is a string
+evalue_cutoff has a value which is a float
 
 
 =end text

@@ -6,14 +6,10 @@ use JSON::XS;
 
 my $u = Bio::KBase::ConservedDomainSearch::Util->new("/scratch/olson/cdd");
 
-my @dat;
-
-while (my($id, $def, $seq) = read_next_fasta_seq(\*STDIN))
-{
-    push(@dat, [$id, $seq]);
-}
+my @dat = read_fasta();
 
 my $ret = $u->process_protein_tuples(\@dat);
+print "$ret\n";
    
-my $json = JSON::XS->new->pretty(1);
-print $json->encode($ret);
+#my $json = JSON::XS->new->pretty(1);
+#print $json->encode($ret);

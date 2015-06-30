@@ -17,7 +17,16 @@ module ConservedDomainSearch
 	list<structural_motif> structural_motifs;
     } cdd_result;
 
-    typedef tuple<string id, string protein> protein_sequence;
+    typedef tuple<string id, string md5, string protein> protein_sequence;
 
-    funcdef cdd_lookup(list<protein_sequence> prots) returns (mapping<string id, cdd_result result> result);
+    typedef structure {
+	string data_mode;	/* Defaults to "std". Valid values "rep", "std", "full" */
+	float evalue_cutoff;	/* Defaults to 0.01. */
+	int cached_only;	/* Only return cached data. Don't try to compute on the fly. */
+    } cdd_lookup_options;	
+
+    funcdef cdd_lookup(list<protein_sequence> prots, cdd_lookup_options options)
+	returns (mapping<string id, cdd_result result> result);
+
+    funcdef cache_add(string xml_document) returns ();
 };

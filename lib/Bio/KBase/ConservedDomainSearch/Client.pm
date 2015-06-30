@@ -92,7 +92,7 @@ sub new
 
 =head2 cdd_lookup
 
-  $result = $obj->cdd_lookup($prots)
+  $result = $obj->cdd_lookup($prots, $options)
 
 =over 4
 
@@ -102,11 +102,18 @@ sub new
 
 <pre>
 $prots is a reference to a list where each element is a protein_sequence
+$options is a cdd_lookup_options
 $result is a reference to a hash where the key is a string and the value is a cdd_result
-protein_sequence is a reference to a list containing 2 items:
+protein_sequence is a reference to a list containing 3 items:
 	0: (id) a string
-	1: (protein) a string
+	1: (md5) a string
+	2: (protein) a string
+cdd_lookup_options is a reference to a hash where the following keys are defined:
+	data_mode has a value which is a string
+	evalue_cutoff has a value which is a float
 cdd_result is a reference to a hash where the following keys are defined:
+	md5sum has a value which is a string
+	len has a value which is an int
 	domain_hits has a value which is a reference to a list where each element is a domain_hit
 	site_annotations has a value which is a reference to a list where each element is a site_annotation
 	structural_motifs has a value which is a reference to a list where each element is a structural_motif
@@ -141,11 +148,18 @@ structural_motif is a reference to a list containing 4 items:
 =begin text
 
 $prots is a reference to a list where each element is a protein_sequence
+$options is a cdd_lookup_options
 $result is a reference to a hash where the key is a string and the value is a cdd_result
-protein_sequence is a reference to a list containing 2 items:
+protein_sequence is a reference to a list containing 3 items:
 	0: (id) a string
-	1: (protein) a string
+	1: (md5) a string
+	2: (protein) a string
+cdd_lookup_options is a reference to a hash where the following keys are defined:
+	data_mode has a value which is a string
+	evalue_cutoff has a value which is a float
 cdd_result is a reference to a hash where the following keys are defined:
+	md5sum has a value which is a string
+	len has a value which is an int
 	domain_hits has a value which is a reference to a list where each element is a domain_hit
 	site_annotations has a value which is a reference to a list where each element is a site_annotation
 	structural_motifs has a value which is a reference to a list where each element is a structural_motif
@@ -190,16 +204,17 @@ sub cdd_lookup
 
 # Authentication: none
 
-    if ((my $n = @args) != 1)
+    if ((my $n = @args) != 2)
     {
 	Bio::KBase::Exceptions::ArgumentValidationError->throw(error =>
-							       "Invalid argument count for function cdd_lookup (received $n, expecting 1)");
+							       "Invalid argument count for function cdd_lookup (received $n, expecting 2)");
     }
     {
-	my($prots) = @args;
+	my($prots, $options) = @args;
 
 	my @_bad_arguments;
         (ref($prots) eq 'ARRAY') or push(@_bad_arguments, "Invalid type for argument 1 \"prots\" (value was \"$prots\")");
+        (ref($options) eq 'HASH') or push(@_bad_arguments, "Invalid type for argument 2 \"options\" (value was \"$options\")");
         if (@_bad_arguments) {
 	    my $msg = "Invalid arguments passed to cdd_lookup:\n" . join("", map { "\t$_\n" } @_bad_arguments);
 	    Bio::KBase::Exceptions::ArgumentValidationError->throw(error => $msg,
@@ -231,6 +246,85 @@ sub cdd_lookup
 
 
 
+=head2 cache_add
+
+  $obj->cache_add($xml_document)
+
+=over 4
+
+=item Parameter and return types
+
+=begin html
+
+<pre>
+$xml_document is a string
+
+</pre>
+
+=end html
+
+=begin text
+
+$xml_document is a string
+
+
+=end text
+
+=item Description
+
+
+
+=back
+
+=cut
+
+sub cache_add
+{
+    my($self, @args) = @_;
+
+# Authentication: none
+
+    if ((my $n = @args) != 1)
+    {
+	Bio::KBase::Exceptions::ArgumentValidationError->throw(error =>
+							       "Invalid argument count for function cache_add (received $n, expecting 1)");
+    }
+    {
+	my($xml_document) = @args;
+
+	my @_bad_arguments;
+        (!ref($xml_document)) or push(@_bad_arguments, "Invalid type for argument 1 \"xml_document\" (value was \"$xml_document\")");
+        if (@_bad_arguments) {
+	    my $msg = "Invalid arguments passed to cache_add:\n" . join("", map { "\t$_\n" } @_bad_arguments);
+	    Bio::KBase::Exceptions::ArgumentValidationError->throw(error => $msg,
+								   method_name => 'cache_add');
+	}
+    }
+
+    my $result = $self->{client}->call($self->{url}, $self->{headers}, {
+	method => "ConservedDomainSearch.cache_add",
+	params => \@args,
+    });
+    if ($result) {
+	if ($result->is_error) {
+	    Bio::KBase::Exceptions::JSONRPC->throw(error => $result->error_message,
+					       code => $result->content->{error}->{code},
+					       method_name => 'cache_add',
+					       data => $result->content->{error}->{error} # JSON::RPC::ReturnObject only supports JSONRPC 1.1 or 1.O
+					      );
+	} else {
+	    return;
+	}
+    } else {
+        Bio::KBase::Exceptions::HTTP->throw(error => "Error invoking method cache_add",
+					    status_line => $self->{client}->status_line,
+					    method_name => 'cache_add',
+				       );
+    }
+}
+
+
+
 sub version {
     my ($self) = @_;
     my $result = $self->{client}->call($self->{url}, $self->{headers}, {
@@ -242,16 +336,16 @@ sub version {
             Bio::KBase::Exceptions::JSONRPC->throw(
                 error => $result->error_message,
                 code => $result->content->{code},
-                method_name => 'cdd_lookup',
+                method_name => 'cache_add',
             );
         } else {
             return wantarray ? @{$result->result} : $result->result->[0];
         }
     } else {
         Bio::KBase::Exceptions::HTTP->throw(
-            error => "Error invoking method cdd_lookup",
+            error => "Error invoking method cache_add",
             status_line => $self->{client}->status_line,
-            method_name => 'cdd_lookup',
+            method_name => 'cache_add',
         );
     }
 }
@@ -424,6 +518,8 @@ a reference to a list containing 4 items:
 
 <pre>
 a reference to a hash where the following keys are defined:
+md5sum has a value which is a string
+len has a value which is an int
 domain_hits has a value which is a reference to a list where each element is a domain_hit
 site_annotations has a value which is a reference to a list where each element is a site_annotation
 structural_motifs has a value which is a reference to a list where each element is a structural_motif
@@ -435,6 +531,8 @@ structural_motifs has a value which is a reference to a list where each element 
 =begin text
 
 a reference to a hash where the following keys are defined:
+md5sum has a value which is a string
+len has a value which is an int
 domain_hits has a value which is a reference to a list where each element is a domain_hit
 site_annotations has a value which is a reference to a list where each element is a site_annotation
 structural_motifs has a value which is a reference to a list where each element is a structural_motif
@@ -457,9 +555,10 @@ structural_motifs has a value which is a reference to a list where each element 
 =begin html
 
 <pre>
-a reference to a list containing 2 items:
+a reference to a list containing 3 items:
 0: (id) a string
-1: (protein) a string
+1: (md5) a string
+2: (protein) a string
 
 </pre>
 
@@ -467,9 +566,47 @@ a reference to a list containing 2 items:
 
 =begin text
 
-a reference to a list containing 2 items:
+a reference to a list containing 3 items:
 0: (id) a string
-1: (protein) a string
+1: (md5) a string
+2: (protein) a string
+
+
+=end text
+
+=back
+
+
+
+=head2 cdd_lookup_options
+
+=over 4
+
+
+
+=item Description
+
+Defaults to 0.01.
+
+
+=item Definition
+
+=begin html
+
+<pre>
+a reference to a hash where the following keys are defined:
+data_mode has a value which is a string
+evalue_cutoff has a value which is a float
+
+</pre>
+
+=end html
+
+=begin text
+
+a reference to a hash where the following keys are defined:
+data_mode has a value which is a string
+evalue_cutoff has a value which is a float
 
 
 =end text

@@ -6,6 +6,7 @@ use IPC::Run qw(run);
 use File::Temp;
 use Data::Dumper;
 use Digest::MD5 'md5_hex';
+use XML::LibXML;
 
 sub new
 {
@@ -46,7 +47,7 @@ sub rpsblast_command
 
 sub rpsbproc_command
 {
-    my($self, $in, $out) = @_;
+    my($self, $in, $out, $options) = @_;
 
     my @cmd = ("rpsbproc",
 	       "-m", "std",
@@ -58,6 +59,18 @@ sub rpsbproc_command
     if ($out && $out ne '-')
     {
 	push(@cmd, "-o", $out);
+    }
+    if (ref($options) eq 'HASH')
+    {
+	my $dm = $options->{data_mode};
+	if ($dm eq 'rep' || $dm eq 'std' || $dm eq 'full')
+	{
+	    push(@cmd, "-m", $dm);
+	}
+	if ($options->{evalue_cutoff})
+	{
+	    push(@cmd, "-e", $options->{evalue_cutoff});
+	}
     }
     return @cmd;
 }
@@ -71,8 +84,7 @@ sub process_protein_tuples
     my $temp = File::Temp->new();
     for my $prot (@$prots)
     {
-	print $temp ">$prot->[0]\n$prot->[1]\n";
-	$md5{$prot->[0]} = md5_hex(uc($prot->[1]));
+	print $temp ">$prot->[0]\n$prot->[2]\n";
     }
     close($temp);
 
@@ -80,23 +92,43 @@ sub process_protein_tuples
     my $temp_err = File::Temp->new();
 
     my @blast = $self->rpsblast_command("$temp", "-");
-    my @proc = $self->rpsbproc_command("-", "-");
-    my $ok = run(\@blast, '|', \@proc, '>', $temp_out, '2>', $temp_err);
+    my $ok = run(\@blast, '>', $temp_out, '2>', $temp_err);
     close($temp_out);
     close($temp_err);
 
     if (!$ok)
     {
-	die "Error running @blast | @proc:\n" . `cat $temp_err`;
+	die "Error running @blast:\n" . `cat $temp_err`;
     }
 
-    my $fh;
+    return $temp_out;
+}
 
-    open($fh, "<", $temp_out) or die "Cannot open $temp_out: $!";
+sub postproc_xml
+{
+    my($self, $xml, $options) = @_;
 
-    my $ret = $self->parse_output($fh, \%md5);
+    my @proc = $self->rpsbproc_command("-", "-", $options);
+
+    my $output;
+    my $err;
+    my $ok = run(\@proc, '<', \$xml, '>', \$output, '2>', \$err);
+
+    if (!$ok)
+    {
+	die "Error running @proc:\n$err\n";;
+    }
+
+    my $ret = $self->parse_text($output);
     return $ret;
+}
 
+sub parse_text
+{
+    my($self, $txt) = @_;
+    my $fh;
+    open($fh, "<", \$txt) or die "Cannot open string fh";
+    return $self->parse_output($fh);
 }
 
 sub parse_output
@@ -139,7 +171,7 @@ sub parse_output
 	    my $len = $fields[3];
 	    $cur_fid = $fields[4];
 	    $cur_data = {
-		md5 => $md5->{$cur_fid},
+		ref($md5) ? (md5 => $md5->{$cur_fid}) : (),
 		len => $len, domain_hits => [],
 		site_annotations => [],
 		structural_motifs => [],
@@ -190,4 +222,53 @@ sub parse_output
 
     return $ret;
 }
+
+#
+# Split XML into per-feature chunks. For each, invoke the given callback with the dom node.
+# The code must do with the node what it needs since the node will be rewritten.
+#
+
+sub split_postproc_xml
+{
+    my($self, $file, $cb) = @_;
+    
+    my $dom = XML::LibXML->load_xml(location => $file);
+    my $root = $dom->documentElement();
+
+    my $d2 = XML::LibXML::Document->new($dom->version, $dom->encoding);
+    my $r2 = $root->cloneNode();
+    $d2->setDocumentElement($r2);
+    
+    for my $c ($root->childNodes())
+    {
+	my $id = $c->nodeName();
+
+	if ($id eq 'BlastOutput_iterations')
+	{
+	    my $itop = $c->cloneNode(0);
+	    $r2->addChild($itop);
+	    for my $i ($c->childNodes())
+	    {
+		next if $i->nodeName() eq '#text';
+		
+		my $peg = $i->find("Iteration_query-def/text()");
+		$peg or die "Cannot find ID in node: $i";
+		
+		my $n = $i->cloneNode(1);
+		$itop->addChild($n);
+
+		$cb->("$peg", $d2);
+
+		$itop->removeChild($n);
+	    }
+	}
+	else
+	{
+	    $r2->addChild($c->cloneNode(1));
+	}
+    }
+}
+
+
+
 1;
