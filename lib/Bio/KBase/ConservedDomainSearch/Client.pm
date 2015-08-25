@@ -111,6 +111,7 @@ protein_sequence is a reference to a list containing 3 items:
 cdd_lookup_options is a reference to a hash where the following keys are defined:
 	data_mode has a value which is a string
 	evalue_cutoff has a value which is a float
+	cached_only has a value which is an int
 cdd_result is a reference to a hash where the following keys are defined:
 	md5sum has a value which is a string
 	len has a value which is an int
@@ -157,6 +158,7 @@ protein_sequence is a reference to a list containing 3 items:
 cdd_lookup_options is a reference to a hash where the following keys are defined:
 	data_mode has a value which is a string
 	evalue_cutoff has a value which is a float
+	cached_only has a value which is an int
 cdd_result is a reference to a hash where the following keys are defined:
 	md5sum has a value which is a string
 	len has a value which is an int
@@ -246,6 +248,95 @@ sub cdd_lookup
 
 
 
+=head2 cdd_lookup_domains
+
+  $return = $obj->cdd_lookup_domains($prots)
+
+=over 4
+
+=item Parameter and return types
+
+=begin html
+
+<pre>
+$prots is a reference to a list where each element is a protein_sequence
+$return is a reference to a hash where the key is a string and the value is a reference to a list where each element is a string
+protein_sequence is a reference to a list containing 3 items:
+	0: (id) a string
+	1: (md5) a string
+	2: (protein) a string
+
+</pre>
+
+=end html
+
+=begin text
+
+$prots is a reference to a list where each element is a protein_sequence
+$return is a reference to a hash where the key is a string and the value is a reference to a list where each element is a string
+protein_sequence is a reference to a list containing 3 items:
+	0: (id) a string
+	1: (md5) a string
+	2: (protein) a string
+
+
+=end text
+
+=item Description
+
+
+
+=back
+
+=cut
+
+sub cdd_lookup_domains
+{
+    my($self, @args) = @_;
+
+# Authentication: none
+
+    if ((my $n = @args) != 1)
+    {
+	Bio::KBase::Exceptions::ArgumentValidationError->throw(error =>
+							       "Invalid argument count for function cdd_lookup_domains (received $n, expecting 1)");
+    }
+    {
+	my($prots) = @args;
+
+	my @_bad_arguments;
+        (ref($prots) eq 'ARRAY') or push(@_bad_arguments, "Invalid type for argument 1 \"prots\" (value was \"$prots\")");
+        if (@_bad_arguments) {
+	    my $msg = "Invalid arguments passed to cdd_lookup_domains:\n" . join("", map { "\t$_\n" } @_bad_arguments);
+	    Bio::KBase::Exceptions::ArgumentValidationError->throw(error => $msg,
+								   method_name => 'cdd_lookup_domains');
+	}
+    }
+
+    my $result = $self->{client}->call($self->{url}, $self->{headers}, {
+	method => "ConservedDomainSearch.cdd_lookup_domains",
+	params => \@args,
+    });
+    if ($result) {
+	if ($result->is_error) {
+	    Bio::KBase::Exceptions::JSONRPC->throw(error => $result->error_message,
+					       code => $result->content->{error}->{code},
+					       method_name => 'cdd_lookup_domains',
+					       data => $result->content->{error}->{error} # JSON::RPC::ReturnObject only supports JSONRPC 1.1 or 1.O
+					      );
+	} else {
+	    return wantarray ? @{$result->result} : $result->result->[0];
+	}
+    } else {
+        Bio::KBase::Exceptions::HTTP->throw(error => "Error invoking method cdd_lookup_domains",
+					    status_line => $self->{client}->status_line,
+					    method_name => 'cdd_lookup_domains',
+				       );
+    }
+}
+
+
+
 =head2 cache_add
 
   $obj->cache_add($xml_document)
@@ -325,6 +416,95 @@ sub cache_add
 
 
 
+=head2 pssmid_lookup
+
+  $return = $obj->pssmid_lookup($pssmids)
+
+=over 4
+
+=item Parameter and return types
+
+=begin html
+
+<pre>
+$pssmids is a reference to a list where each element is a string
+$return is a reference to a hash where the key is a string and the value is a reference to a list containing 4 items:
+	0: (accession) a string
+	1: (shortname) a string
+	2: (description) a string
+	3: (len) a string
+
+</pre>
+
+=end html
+
+=begin text
+
+$pssmids is a reference to a list where each element is a string
+$return is a reference to a hash where the key is a string and the value is a reference to a list containing 4 items:
+	0: (accession) a string
+	1: (shortname) a string
+	2: (description) a string
+	3: (len) a string
+
+
+=end text
+
+=item Description
+
+
+
+=back
+
+=cut
+
+sub pssmid_lookup
+{
+    my($self, @args) = @_;
+
+# Authentication: none
+
+    if ((my $n = @args) != 1)
+    {
+	Bio::KBase::Exceptions::ArgumentValidationError->throw(error =>
+							       "Invalid argument count for function pssmid_lookup (received $n, expecting 1)");
+    }
+    {
+	my($pssmids) = @args;
+
+	my @_bad_arguments;
+        (ref($pssmids) eq 'ARRAY') or push(@_bad_arguments, "Invalid type for argument 1 \"pssmids\" (value was \"$pssmids\")");
+        if (@_bad_arguments) {
+	    my $msg = "Invalid arguments passed to pssmid_lookup:\n" . join("", map { "\t$_\n" } @_bad_arguments);
+	    Bio::KBase::Exceptions::ArgumentValidationError->throw(error => $msg,
+								   method_name => 'pssmid_lookup');
+	}
+    }
+
+    my $result = $self->{client}->call($self->{url}, $self->{headers}, {
+	method => "ConservedDomainSearch.pssmid_lookup",
+	params => \@args,
+    });
+    if ($result) {
+	if ($result->is_error) {
+	    Bio::KBase::Exceptions::JSONRPC->throw(error => $result->error_message,
+					       code => $result->content->{error}->{code},
+					       method_name => 'pssmid_lookup',
+					       data => $result->content->{error}->{error} # JSON::RPC::ReturnObject only supports JSONRPC 1.1 or 1.O
+					      );
+	} else {
+	    return wantarray ? @{$result->result} : $result->result->[0];
+	}
+    } else {
+        Bio::KBase::Exceptions::HTTP->throw(error => "Error invoking method pssmid_lookup",
+					    status_line => $self->{client}->status_line,
+					    method_name => 'pssmid_lookup',
+				       );
+    }
+}
+
+
+
 sub version {
     my ($self) = @_;
     my $result = $self->{client}->call($self->{url}, $self->{headers}, {
@@ -336,16 +516,16 @@ sub version {
             Bio::KBase::Exceptions::JSONRPC->throw(
                 error => $result->error_message,
                 code => $result->content->{code},
-                method_name => 'cache_add',
+                method_name => 'pssmid_lookup',
             );
         } else {
             return wantarray ? @{$result->result} : $result->result->[0];
         }
     } else {
         Bio::KBase::Exceptions::HTTP->throw(
-            error => "Error invoking method cache_add",
+            error => "Error invoking method pssmid_lookup",
             status_line => $self->{client}->status_line,
-            method_name => 'cache_add',
+            method_name => 'pssmid_lookup',
         );
     }
 }
@@ -586,7 +766,7 @@ a reference to a list containing 3 items:
 
 =item Description
 
-Defaults to 0.01.
+Only return cached data. Don't try to compute on the fly.
 
 
 =item Definition
@@ -597,6 +777,7 @@ Defaults to 0.01.
 a reference to a hash where the following keys are defined:
 data_mode has a value which is a string
 evalue_cutoff has a value which is a float
+cached_only has a value which is an int
 
 </pre>
 
@@ -607,6 +788,7 @@ evalue_cutoff has a value which is a float
 a reference to a hash where the following keys are defined:
 data_mode has a value which is a string
 evalue_cutoff has a value which is a float
+cached_only has a value which is an int
 
 
 =end text

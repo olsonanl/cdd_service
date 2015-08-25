@@ -28,7 +28,9 @@ our $CallContext;
 
 our %return_counts = (
         'cdd_lookup' => 1,
+        'cdd_lookup_domains' => 1,
         'cache_add' => 0,
+        'pssmid_lookup' => 1,
         'version' => 1,
 );
 
@@ -39,7 +41,9 @@ sub _build_valid_methods
     my($self) = @_;
     my $methods = {
         'cdd_lookup' => 1,
+        'cdd_lookup_domains' => 1,
         'cache_add' => 1,
+        'pssmid_lookup' => 1,
         'version' => 1,
     };
     return $methods;

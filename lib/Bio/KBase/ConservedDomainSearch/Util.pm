@@ -49,8 +49,7 @@ sub rpsbproc_command
 {
     my($self, $in, $out, $options) = @_;
 
-    my @cmd = ("rpsbproc",
-	       "-m", "std",
+    my @cmd = ("/disks/patric-common/runtime/bin/rpsbproc",
 	       "-c", "$self->{cdd_data}/rpsbproc.ini");
     if ($in && $in ne '-')
     {
@@ -66,6 +65,10 @@ sub rpsbproc_command
 	if ($dm eq 'rep' || $dm eq 'std' || $dm eq 'full')
 	{
 	    push(@cmd, "-m", $dm);
+	}
+	else
+	{
+	    push(@cmd, "-m", "rep");
 	}
 	if ($options->{evalue_cutoff})
 	{
@@ -135,10 +138,18 @@ sub parse_output
 {
     my($self, $fh, $md5) = @_;
 
+    my $redundancy;
+
     while (<$fh>)
     {
+	if (/^#Redundancy:\s*(\S+)/)
+	{
+	    $redundancy = $1;
+	}
 	last if /^DATA/;
     }
+
+    my $rshort = substr($redundancy, 0, 1);
 
     my $cur_session;
     my $cur_query;
@@ -204,7 +215,7 @@ sub parse_output
 	{
 	    $cur_block = 'structural_motifs';
 	}
-	elsif ($tag eq 'ENDSITES')
+	elsif ($tag eq 'ENDMOTIFS')
 	{
 	    undef $cur_block;
 	}
@@ -220,7 +231,14 @@ sub parse_output
     }
     close($fh);
 
-    return $ret;
+    if (wantarray)
+    {
+	return($ret, $rshort);
+    }
+    else
+    {
+	return $ret;
+    }
 }
 
 #

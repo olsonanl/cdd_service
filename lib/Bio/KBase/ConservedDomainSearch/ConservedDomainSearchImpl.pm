@@ -63,6 +63,24 @@ sub new
 			     expires_at => CHI_Max_Time);
 	$self->{cache} = $cache;
     }
+
+    #
+    # Read the cddid.tblfile
+    #
+    if (open(my $fh, "<", "$cdd_data/data/cddid.tbl"))
+    {
+	while (<$fh>)
+	{
+	    chomp;
+	    my($id, $acc, $short, $desc, $len) = split(/\t/);
+	    $self->{cddid}->{$id} = [$acc, $short, $desc, $len];
+	}
+	close($fh);
+    }
+    else
+    {
+	warn "Cannot open $cdd_data/cddid.tbl: $!";
+    }
     
     #END_CONSTRUCTOR
 
@@ -98,6 +116,7 @@ protein_sequence is a reference to a list containing 3 items:
 cdd_lookup_options is a reference to a hash where the following keys are defined:
 	data_mode has a value which is a string
 	evalue_cutoff has a value which is a float
+	cached_only has a value which is an int
 cdd_result is a reference to a hash where the following keys are defined:
 	md5sum has a value which is a string
 	len has a value which is an int
@@ -144,6 +163,7 @@ protein_sequence is a reference to a list containing 3 items:
 cdd_lookup_options is a reference to a hash where the following keys are defined:
 	data_mode has a value which is a string
 	evalue_cutoff has a value which is a float
+	cached_only has a value which is an int
 cdd_result is a reference to a hash where the following keys are defined:
 	md5sum has a value which is a string
 	len has a value which is an int
@@ -246,7 +266,7 @@ sub cdd_lookup
 	$val = $cache->get($md5);
 	if ($val)
 	{
-	    print "Found $id $md5\n";
+	    # print "Found $id $md5\n";
 	    my $r1 = $self->{util}->postproc_xml($val, $options);
 	    $result->{$id} = $r1->{$md5};
 	    $cache->set($dmkey, $r1->{$md5});
@@ -255,12 +275,12 @@ sub cdd_lookup
 	{
 	    if (!exists($md5_to_id{$md5}))
 	    {
-		print "compute $id $md5\n";
+		# print "compute $id $md5\n";
 		push(@to_compute, [$md5, undef, $seq]);
 	    }
 	    else
 	    {
-		print "Already computing $md5 ($id)\n";
+		# print "Already computing $md5 ($id)\n";
 	    }
 	    push(@{$md5_to_id{$md5}}, $id);
 	}
@@ -286,7 +306,7 @@ sub cdd_lookup
 	    if ($cache)
 	    {
 		my $dmkey = "$md5-$data_mode";
-		print "Cache $md5\n";
+		# print "Cache $md5\n";
 		$cache->set($md5, $txt);
 		$cache->set($dmkey, $r1->{$md5});
 	    }
@@ -306,6 +326,80 @@ sub cdd_lookup
 							       method_name => 'cdd_lookup');
     }
     return($result);
+}
+
+
+
+
+=head2 cdd_lookup_domains
+
+  $return = $obj->cdd_lookup_domains($prots)
+
+=over 4
+
+=item Parameter and return types
+
+=begin html
+
+<pre>
+$prots is a reference to a list where each element is a protein_sequence
+$return is a reference to a hash where the key is a string and the value is a reference to a list where each element is a string
+protein_sequence is a reference to a list containing 3 items:
+	0: (id) a string
+	1: (md5) a string
+	2: (protein) a string
+
+</pre>
+
+=end html
+
+=begin text
+
+$prots is a reference to a list where each element is a protein_sequence
+$return is a reference to a hash where the key is a string and the value is a reference to a list where each element is a string
+protein_sequence is a reference to a list containing 3 items:
+	0: (id) a string
+	1: (md5) a string
+	2: (protein) a string
+
+
+=end text
+
+
+
+=item Description
+
+
+
+=back
+
+=cut
+
+sub cdd_lookup_domains
+{
+    my $self = shift;
+    my($prots) = @_;
+
+    my @_bad_arguments;
+    (ref($prots) eq 'ARRAY') or push(@_bad_arguments, "Invalid type for argument \"prots\" (value was \"$prots\")");
+    if (@_bad_arguments) {
+	my $msg = "Invalid arguments passed to cdd_lookup_domains:\n" . join("", map { "\t$_\n" } @_bad_arguments);
+	Bio::KBase::Exceptions::ArgumentValidationError->throw(error => $msg,
+							       method_name => 'cdd_lookup_domains');
+    }
+
+    my $ctx = $Bio::KBase::ConservedDomainSearch::Service::CallContext;
+    my($return);
+    #BEGIN cdd_lookup_domains
+    #END cdd_lookup_domains
+    my @_bad_returns;
+    (ref($return) eq 'HASH') or push(@_bad_returns, "Invalid type for return variable \"return\" (value was \"$return\")");
+    if (@_bad_returns) {
+	my $msg = "Invalid returns passed to cdd_lookup_domains:\n" . join("", map { "\t$_\n" } @_bad_returns);
+	Bio::KBase::Exceptions::ArgumentValidationError->throw(error => $msg,
+							       method_name => 'cdd_lookup_domains');
+    }
+    return($return);
 }
 
 
@@ -362,6 +456,91 @@ sub cache_add
     #BEGIN cache_add
     #END cache_add
     return();
+}
+
+
+
+
+=head2 pssmid_lookup
+
+  $return = $obj->pssmid_lookup($pssmids)
+
+=over 4
+
+=item Parameter and return types
+
+=begin html
+
+<pre>
+$pssmids is a reference to a list where each element is a string
+$return is a reference to a hash where the key is a string and the value is a reference to a list containing 4 items:
+	0: (accession) a string
+	1: (shortname) a string
+	2: (description) a string
+	3: (len) a string
+
+</pre>
+
+=end html
+
+=begin text
+
+$pssmids is a reference to a list where each element is a string
+$return is a reference to a hash where the key is a string and the value is a reference to a list containing 4 items:
+	0: (accession) a string
+	1: (shortname) a string
+	2: (description) a string
+	3: (len) a string
+
+
+=end text
+
+
+
+=item Description
+
+
+
+=back
+
+=cut
+
+sub pssmid_lookup
+{
+    my $self = shift;
+    my($pssmids) = @_;
+
+    my @_bad_arguments;
+    (ref($pssmids) eq 'ARRAY') or push(@_bad_arguments, "Invalid type for argument \"pssmids\" (value was \"$pssmids\")");
+    if (@_bad_arguments) {
+	my $msg = "Invalid arguments passed to pssmid_lookup:\n" . join("", map { "\t$_\n" } @_bad_arguments);
+	Bio::KBase::Exceptions::ArgumentValidationError->throw(error => $msg,
+							       method_name => 'pssmid_lookup');
+    }
+
+    my $ctx = $Bio::KBase::ConservedDomainSearch::Service::CallContext;
+    my($return);
+    #BEGIN pssmid_lookup
+
+    $return = {};
+    for my $id (@$pssmids)
+    {
+	my $val = $self->{cddid}->{$id};
+	if ($val)
+	{
+	    $return->{$id} = $val;
+	}
+    }
+	 
+    #END pssmid_lookup
+    my @_bad_returns;
+    (ref($return) eq 'HASH') or push(@_bad_returns, "Invalid type for return variable \"return\" (value was \"$return\")");
+    if (@_bad_returns) {
+	my $msg = "Invalid returns passed to pssmid_lookup:\n" . join("", map { "\t$_\n" } @_bad_returns);
+	Bio::KBase::Exceptions::ArgumentValidationError->throw(error => $msg,
+							       method_name => 'pssmid_lookup');
+    }
+    return($return);
 }
 
 
@@ -609,7 +788,7 @@ a reference to a list containing 3 items:
 
 =item Description
 
-Defaults to 0.01.
+Only return cached data. Don't try to compute on the fly.
 
 
 =item Definition
@@ -620,6 +799,7 @@ Defaults to 0.01.
 a reference to a hash where the following keys are defined:
 data_mode has a value which is a string
 evalue_cutoff has a value which is a float
+cached_only has a value which is an int
 
 </pre>
 
@@ -630,6 +810,7 @@ evalue_cutoff has a value which is a float
 a reference to a hash where the following keys are defined:
 data_mode has a value which is a string
 evalue_cutoff has a value which is a float
+cached_only has a value which is an int
 
 
 =end text

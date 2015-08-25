@@ -28,5 +28,11 @@ module ConservedDomainSearch
     funcdef cdd_lookup(list<protein_sequence> prots, cdd_lookup_options options)
 	returns (mapping<string id, cdd_result result> result);
 
+    funcdef cdd_lookup_domains(list<protein_sequence> prots) returns (mapping<string id, list<string> domains>);
+
     funcdef cache_add(string xml_document) returns ();
+
+    funcdef pssmid_lookup(list<string> pssmids)
+	returns (mapping<string pssmid, tuple<string accession, string shortname, string description, string len>>);
+							 
 };
