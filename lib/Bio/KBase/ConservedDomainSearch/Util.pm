@@ -6,19 +6,29 @@ use IPC::Run qw(run);
 use File::Temp;
 use Data::Dumper;
 use Digest::MD5 'md5_hex';
+use JSON::XS;
 use XML::LibXML;
+
+use base 'Class::Accessor';
+__PACKAGE__->mk_accessors(qw(db_batch_size));
+
 
 sub new
 {
-    my($class, $cdd_data) = @_;
+    my($class, $impl) = @_;
 
     my $self = {
-	cdd_data => $cdd_data,
+	impl => $impl,
+	db_batch_size => 200,
 	evalue => 0.01,
     };
 
     return bless $self, $class;
 }
+
+sub cdd_data { $_[0]->{impl}->{_cdd_data} }
+sub dbh { $_[0]->{impl}->{_dbh} }
+sub batch_output_dir { $_[0]->{impl}->{_batch_output_dir} }
 
 sub rpsblast_command
 {
@@ -40,7 +50,7 @@ sub rpsblast_command
 	       "-evalue", $self->{evalue},
 	       "-seg", "no",
 	       "-outfmt", 5,
-	       "-db", "$self->{cdd_data}/data/Cdd",
+	       "-db", $self->cdd_data . "/data/Cdd",
 	       "-out", $out);
     return @cmd;
 }
@@ -50,7 +60,7 @@ sub rpsbproc_command
     my($self, $in, $out, $options) = @_;
 
     my @cmd = ("/disks/patric-common/runtime/bin/rpsbproc",
-	       "-c", "$self->{cdd_data}/rpsbproc.ini");
+	       "-c", $self->cdd_data . "/rpsbproc.ini");
     if ($in && $in ne '-')
     {
 	push(@cmd, "-i", $in);
@@ -249,8 +259,16 @@ sub parse_output
 sub split_postproc_xml
 {
     my($self, $file, $cb) = @_;
-    
-    my $dom = XML::LibXML->load_xml(location => $file);
+
+    my $dom;
+    if (ref($file) eq 'ARRAY')
+    {
+	$dom = XML::LibXML->load_xml(@$file);
+    }
+    else
+    {	    
+	$dom = XML::LibXML->load_xml(location => $file);
+    }
     my $root = $dom->documentElement();
 
     my $d2 = XML::LibXML::Document->new($dom->version, $dom->encoding);
@@ -275,7 +293,7 @@ sub split_postproc_xml
 		my $n = $i->cloneNode(1);
 		$itop->addChild($n);
 
-		$cb->("$peg", $d2);
+		$cb->($peg, $d2);
 
 		$itop->removeChild($n);
 	    }
@@ -287,6 +305,204 @@ sub split_postproc_xml
     }
 }
 
+
+sub query_parsed_output
+{
+    my($self, $data_mode, $need, $result) = @_;
+
+    my @md5s = keys %$need;
+    my $dbh = $self->dbh;
+    
+    while (@md5s)
+    {
+	my @q = splice(@md5s, 0, $self->db_batch_size);
+	my $qs = join(", ", map { "?" } @q);
+
+	my $res = $dbh->selectall_arrayref(qq(SELECT md5, value
+					      FROM parsed_output
+					      WHERE redundancy = ? AND md5 IN ($qs)), undef, $data_mode, @q);
+	for my $ent (@$res)
+	{
+	    my($id, $value) = @$ent;
+	    my $hits = delete $need->{$id};
+	    my $v = decode_json($value);
+	    for my $hit (@$hits)
+	    {
+		$result->{$hit->[0]} = $v;
+	    }
+	}
+    }
+}
+
+sub query_domain_coverage
+{
+    my($self, $need, $result) = @_;
+
+    my $dbh = $self->dbh;
+    my @md5s = keys %$need;
+    
+    while (@md5s)
+    {
+	my @q = splice(@md5s, 0, $self->db_batch_size);
+	my $qs = join(", ", map { "?" } @q);
+
+	my $res = $dbh->selectall_arrayref(qq(SELECT md5, domains
+					      FROM domain_coverage
+					      WHERE md5 IN ($qs)), undef, @q);
+	for my $ent (@$res)
+	{
+	    my($id, $value) = @$ent;
+	    my $hits = delete $need->{$id};
+	    for my $hit (@$hits)
+	    {
+		$result->{$hit->[0]} = [split(/\s+/, $value)];
+	    }
+	}
+    }
+}
+
+sub incoming_prots_to_hash
+{
+    my($self, $prots) = @_;
+
+    my $need = {};
+    
+    for my $ent (@$prots)
+    {
+	my($id, $md5, $seq) = @$ent;
+	if (!$md5)
+	{
+	    $md5 = md5_hex(uc($seq));
+	    $ent->[1] = $md5;
+	}
+
+	push(@{$need->{$md5}}, $ent);
+    }
+    return $need;
+}
+
+sub update_batch
+{
+    my($self, $need) = @_;
+
+    #
+    # Update the batch in need.
+    # Create a batch ID.
+    # Run rpsblast from created input.
+    # Run rpsbproc postprocessing.
+    # Update database.
+    #
+
+
+    my $dbh = $self->dbh;
+    my $res = $dbh->do(qq(INSERT INTO update_batch() VALUES ()));
+    my $id = $dbh->{'mysql_insertid'};
+
+    print STDERR "Created batch $id\n";
+
+    my $tmp_in = File::Temp->new();
+    for my $md5 (keys %$need)
+    {
+	my $v = $need->{$md5}->[0];
+	print $tmp_in ">gnl|md5|$md5\n$v->[2]\n";
+    }
+    close($tmp_in);
+
+    my $dir = $self->batch_output_dir;
+    my $raw = sprintf("$dir/raw.%05d.gz", $id);
+
+    my @cmd = $self->rpsblast_command("-", "-");
+    my $ok = run(\@cmd, '<', "$tmp_in", "|",
+		 ["gzip"], '>', $raw);
+    if (!$ok)
+    {
+	die "Error creating blast with @cmd: $!\n";
+    }
+    for my $mode (qw(rep std))
+    {
+	my $out = sprintf("$dir/$mode.%05d.gz", $id);
+	@cmd = $self->rpsbproc_command('-', '-', { data_mode => $mode });
+	my $ok = run(["gzip", "-d", "-c", $raw], '|',
+		     \@cmd, '|',
+		     ["gzip"], '>', $out);
+	$ok or die "error running @cmd: $!\n";
+	$self->process_parsed_data($out);
+    }
+}
+
+sub process_parsed_data
+{
+    my($self, $file) = @_;
+
+    my $fh;
+    if ($file =~ /gz$/)
+    {
+	open($fh, "-|", "gzip", "-d", "-c", $file) or die "Cannot gzip -d -c $file: $!";
+    }
+    else
+    {
+	open($fh, "<", $file) or die "Cannot open $file: $!";
+    }
+
+    my($ret, $redundancy) = $self->parse_output($fh);
+    print STDERR "Process $file ($redundancy)\n";
+
+    my $json = JSON::XS->new->ascii->pretty(1);
+
+    my $dbh = $self->dbh;
+
+    my $sth1 = $dbh->prepare(qq(INSERT INTO parsed_output(md5, redundancy, value) VALUES (?, '$redundancy', ?)));
+    my $sth2 = $dbh->prepare(qq(INSERT INTO domain_coverage(md5, domains) VALUES (?, ?)));
+
+    my $n = 0;
+    while (my($id, $val) = each %$ret)
+    {
+	my($md5) = $id =~ /gnl\|md5\|(\S+)/;
+	$md5 or die "Invalid id $id\n";
+	my $out;
+	my $jtext = $json->encode($val);
+	# bzip2(\$jtext, \$out);
+	eval {
+	    $sth1->execute($md5, $jtext);
+	};
+	if ($@)
+	{
+	    if ($@ !~ /Duplicate entry/)
+	    {
+		die $@;
+	    }
+	}
+		    
+
+	if ($redundancy eq 'C')
+	{
+	    my $dhits = $val->{domain_hits};
+	    
+	    my @o;
+	    for my $h (sort { $a->[2] <=> $b->[2] } @$dhits)
+	    {
+		if ($h->[0] eq 'Specific')
+		{
+		    push(@o, $h->[6]);
+		}
+	    }
+	    my $d = join(" ", @o);
+
+	    eval {
+		$sth2->execute($md5, $d);
+	    };
+	    if ($@)
+	    {
+		if ($@ !~ /Duplicate entry/)
+		{
+		    die $@;
+		}
+	    }
+	}
+	$n++;
+    }
+    $dbh->commit();
+}
 
 
 1;

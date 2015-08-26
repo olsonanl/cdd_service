@@ -18,20 +18,10 @@ ConservedDomainSearch
 #BEGIN_HEADER
 use Bio::KBase::ConservedDomainSearch::Util;
 use Bio::KBase::DeploymentConfig;
-use CHI;
-use CHI::Constants qw(CHI_Max_Time);
+use DBI;
 use Digest::MD5 'md5_hex';
 use Data::Dumper;
-
-sub _has_cached
-{
-    my($self, $md5) = @_;
-    if ($self->{cache})
-    {
-	return $self->{cache}->is_valid($md5);
-    }
-    return undef;
-}
+use JSON::XS;
 
 #END_HEADER
 
@@ -45,24 +35,25 @@ sub new
 
     my $cfg = Bio::KBase::DeploymentConfig->new($ENV{KB_SERVICE_NAME} || "ConservedDomainSearch");
 
-    my $cdd_data = $cfg->setting("cdd-data");
+    my $cdd_data = $self->{_cdd_data} = $cfg->setting("cdd-data");
     $cdd_data or die "ConservedDomainSearch: cdd-data must be set";
     -d $cdd_data or die  "ConservedDomainSearch: cdd-data setting $cdd_data is not a directory";
 
-    my $util = Bio::KBase::ConservedDomainSearch::Util->new($cdd_data);
+    my $util = Bio::KBase::ConservedDomainSearch::Util->new($self, $cdd_data);
     $self->{util} = $util;
 
-    my $cache_dir = $cfg->setting("cache-dir");
-    $self->{cache_dir} = $cache_dir;
+    $self->{_batch_output_dir} = $cfg->setting('batch-output-dir');
 
-    if ($cache_dir)
-    {
-	my $cache = CHI->new(driver => 'File',
-			     compress_threshold => 50_000,
-			     root_dir => $cache_dir,
-			     expires_at => CHI_Max_Time);
-	$self->{cache} = $cache;
-    }
+    my $dbname = $self->{_dbname} = $cfg->setting('db-name');
+    my $dbhost = $self->{_dbhost} = $cfg->setting('db-host');
+    my $dbuser = $self->{_dbuser} = $cfg->setting('db-user');
+    my $dbpass = $self->{_dbpass} = $cfg->setting('db-password');
+
+    my $dbh = DBI->connect("dbi:mysql:$dbname;host=$dbhost", $dbuser, $dbpass,
+		       { RaiseError => 1, AutoCommit => 0, PrintError => 1 });
+    $dbh or die "Cannot connect to database: " . $DBI::errstr;
+
+    $self->{_dbh} = $dbh;
 
     #
     # Read the cddid.tblfile
@@ -233,89 +224,65 @@ sub cdd_lookup
     # a default (non-specified) evalue cutoff.
     #
 
-    my $cache = $self->{cache};
     my @to_compute;
     my %md5_to_id;
 
-    $options->{data_mode} ||= 'std';
-    my $data_mode= $options->{data_mode};
+    $options->{data_mode} ||= 'rep';
+    my $data_mode = $options->{data_mode};
+
+    my %map = ( rep => 'C', std => 'S', full => 'F' );
+    $data_mode = $map{$data_mode};
 
     $result = {};
 
-    for my $ent (@$prots)
+    my $dbh = $self->{_dbh};
+    $dbh->ping();
+
+    my $need = $self->{util}->incoming_prots_to_hash($prots);
+
+    $self->{util}->query_parsed_output($data_mode, $need, $result);
+    
+    if (%$need)
     {
-	my($id, $md5, $seq) = @$ent;
-	if (!$md5)
-	{
-	    $md5 = md5_hex(uc($seq));
-	    $ent->[1] = $md5;
-	}
-
-	next unless $cache;
-
-	my $dmkey = "$md5-$data_mode";
-
-	my $val = $cache->get($dmkey);
-
-	if ($val)
-	{
-	    $result->{$id} = $val;
-	    next;
-	}
-
-	$val = $cache->get($md5);
-	if ($val)
-	{
-	    # print "Found $id $md5\n";
-	    my $r1 = $self->{util}->postproc_xml($val, $options);
-	    $result->{$id} = $r1->{$md5};
-	    $cache->set($dmkey, $r1->{$md5});
-	}
-	else
-	{
-	    if (!exists($md5_to_id{$md5}))
-	    {
-		# print "compute $id $md5\n";
-		push(@to_compute, [$md5, undef, $seq]);
-	    }
-	    else
-	    {
-		# print "Already computing $md5 ($id)\n";
-	    }
-	    push(@{$md5_to_id{$md5}}, $id);
-	}
+	$self->{util}->update_batch($need);
+	$self->{util}->query_parsed_output($data_mode, $need, $result);
     }
 
-    #
-    # Now compute the ones that need computing. XML is returned in a File::Temp tempfile;
-    #
-
-    if (@to_compute && !$options->{cached_only})
+    if (%$need)
     {
-	my $temp_out = $self->{util}->process_protein_tuples(\@to_compute);
-	
-	#
-	# Split and cache.
-	#
-	
-	$self->{util}->split_postproc_xml($temp_out, sub {
-	    my($md5, $node) = @_;
-	    my $txt = $node->toString();
-	    my $r1 = $self->{util}->postproc_xml($txt, $options);
-
-	    if ($cache)
-	    {
-		my $dmkey = "$md5-$data_mode";
-		# print "Cache $md5\n";
-		$cache->set($md5, $txt);
-		$cache->set($dmkey, $r1->{$md5});
-	    }
-	    for my $id (@{$md5_to_id{$md5}})
-	    {
-		$result->{$id} = $r1->{$md5};
-	    }
-	});
+	print STDERR "AFTER update still need " . Dumper($need);
     }
+
+    # #
+    # # Now compute the ones that need computing. XML is returned in a File::Temp tempfile;
+    # #
+
+    # if (@to_compute && !$options->{cached_only})
+    # {
+    # 	my $temp_out = $self->{util}->process_protein_tuples(\@to_compute);
+	
+    # 	#
+    # 	# Split and cache.
+    # 	#
+	
+    # 	$self->{util}->split_postproc_xml($temp_out, sub {
+    # 	    my($md5, $node) = @_;
+    # 	    my $txt = $node->toString();
+    # 	    my $r1 = $self->{util}->postproc_xml($txt, $options);
+
+    # 	    if ($cache)
+    # 	    {
+    # 		my $dmkey = "$md5-$data_mode";
+    # 		# print "Cache $md5\n";
+    # 		$cache->set($md5, $txt);
+    # 		$cache->set($dmkey, $r1->{$md5});
+    # 	    }
+    # 	    for my $id (@{$md5_to_id{$md5}})
+    # 	    {
+    # 		$result->{$id} = $r1->{$md5};
+    # 	    }
+    # 	});
+    # }
     
     #END cdd_lookup
     my @_bad_returns;
@@ -391,6 +358,27 @@ sub cdd_lookup_domains
     my $ctx = $Bio::KBase::ConservedDomainSearch::Service::CallContext;
     my($return);
     #BEGIN cdd_lookup_domains
+
+    $return = {};
+
+    my $dbh = $self->{_dbh};
+    $dbh->ping();
+
+    my $need = $self->{util}->incoming_prots_to_hash($prots);
+
+    $self->{util}->query_domain_coverage($need, $return);
+
+    if (%$need)
+    {
+	$self->{util}->update_batch($need);
+	$self->{util}->query_domain_coverage($need, $return);
+    }
+
+    if (%$need)
+    {
+	print STDERR "AFTER update still need " . Dumper($need);
+    }
+    
     #END cdd_lookup_domains
     my @_bad_returns;
     (ref($return) eq 'HASH') or push(@_bad_returns, "Invalid type for return variable \"return\" (value was \"$return\")");
