@@ -400,33 +400,55 @@ sub update_batch
 
     print STDERR "Created batch $id\n";
 
-    my $tmp_in = File::Temp->new();
-    for my $md5 (keys %$need)
-    {
-	my $v = $need->{$md5}->[0];
-	print $tmp_in ">gnl|md5|$md5\n$v->[2]\n";
-    }
-    close($tmp_in);
+    my $files;
+    eval {
 
-    my $dir = $self->batch_output_dir;
-    my $raw = sprintf("$dir/raw.%05d.gz", $id);
+	my $tmp_in = File::Temp->new();
+	for my $md5 (keys %$need)
+	{
+	    my $v = $need->{$md5}->[0];
+	    print $tmp_in ">gnl|md5|$md5\n$v->[2]\n";
+	}
+	close($tmp_in);
+	
+	my $dir = $self->batch_output_dir;
+	my $raw = sprintf("$dir/raw.%05d.gz", $id);
+	$files = $raw;
 
-    my @cmd = $self->rpsblast_command("-", "-");
-    my $ok = run(\@cmd, '<', "$tmp_in", "|",
-		 ["gzip"], '>', $raw);
-    if (!$ok)
+	my @cmd = $self->rpsblast_command("-", "-");
+	my $ok = run(\@cmd, '<', "$tmp_in", "|",
+		     ["gzip"], '>', $raw);
+	if (!$ok)
+	{
+	    die "Error creating blast with @cmd: $!\n";
+	}
+	for my $mode (qw(rep std))
+	{
+	    my $out = sprintf("$dir/$mode.%05d.gz", $id);
+	    @cmd = $self->rpsbproc_command('-', '-', { data_mode => $mode });
+	    my $ok = run(["gzip", "-d", "-c", $raw], '|',
+			 \@cmd, '|',
+			 ["gzip"], '>', $out);
+	    $ok or die "error running @cmd: $!\n";
+	    $self->process_parsed_data($out);
+	    $files .= " $out";
+	}
+    };
+    if ($@)
     {
-	die "Error creating blast with @cmd: $!\n";
+	$dbh->do(qq(UPDATE update_batch
+		    SET completion_date = current_timestamp, success = 0, status = ?
+		    WHERE id = ?), undef, $@, $id);
+	$dbh->commit();
+	die $@;
     }
-    for my $mode (qw(rep std))
+    else
     {
-	my $out = sprintf("$dir/$mode.%05d.gz", $id);
-	@cmd = $self->rpsbproc_command('-', '-', { data_mode => $mode });
-	my $ok = run(["gzip", "-d", "-c", $raw], '|',
-		     \@cmd, '|',
-		     ["gzip"], '>', $out);
-	$ok or die "error running @cmd: $!\n";
-	$self->process_parsed_data($out);
+	$dbh->do(qq(UPDATE update_batch
+		    SET completion_date = current_timestamp, success = 1, status = ?
+		    WHERE id = ?
+		   ), undef, "Wrote $files", $id);
+	$dbh->commit();
     }
 }
 

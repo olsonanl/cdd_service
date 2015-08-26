@@ -33,6 +33,8 @@ drop table if exists update_batch;
 create table update_batch
 (
     id integer auto_increment,
+    success integer,
+    status text,
     creation_date timestamp default current_timestamp,
     completion_date timestamp,
     primary key (id)
