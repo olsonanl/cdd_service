@@ -17,9 +17,10 @@ create table raw_output
 drop table if exists parsed_output;
 create table parsed_output
 (
-    md5 varchar(32) primary key,
+    md5 varchar(32),
     redundancy char,
-    value text
+    value text,
+    primary key (md5, redundancy)
 ) engine innodb;
 
 drop table if exists domain_coverage;

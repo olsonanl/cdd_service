@@ -38,8 +38,8 @@ while (my($id, $def, $seq) = read_next_fasta_seq("/vol/core-seed/FIGdisk/FIG/Dat
 #    last if @prots >= $n;
 }
 
-#my $res = $impl->cdd_lookup_domains(\@prots);
-#print Dumper($res);
+my $res = $impl->cdd_lookup_domains(\@prots);
+print Dumper($res);
 
 my $res = $impl->cdd_lookup(\@prots, { data_mode => 'rep' });
 

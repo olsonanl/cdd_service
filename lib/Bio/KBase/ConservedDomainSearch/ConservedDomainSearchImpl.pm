@@ -23,6 +23,19 @@ use Digest::MD5 'md5_hex';
 use Data::Dumper;
 use JSON::XS;
 
+sub _db_connect
+{
+    my($self) = @_;
+    
+    my $dbh = DBI->connect(@{$self->{_db_connect_args}});
+
+    $dbh or die "Cannot connect to database: " . $DBI::errstr;
+
+    $self->{_dbh} = $dbh;
+
+    return $dbh;
+}
+
 #END_HEADER
 
 sub new
@@ -49,11 +62,11 @@ sub new
     my $dbuser = $self->{_dbuser} = $cfg->setting('db-user');
     my $dbpass = $self->{_dbpass} = $cfg->setting('db-password');
 
-    my $dbh = DBI->connect("dbi:mysql:$dbname;host=$dbhost", $dbuser, $dbpass,
+    my @connect = ("dbi:mysql:$dbname;host=$dbhost", $dbuser, $dbpass,
 		       { RaiseError => 1, AutoCommit => 0, PrintError => 1 });
-    $dbh or die "Cannot connect to database: " . $DBI::errstr;
 
-    $self->{_dbh} = $dbh;
+    $self->{_db_connect_args} = [@connect];
+    $self->_db_connect();
 
     #
     # Read the cddid.tblfile
@@ -236,7 +249,10 @@ sub cdd_lookup
     $result = {};
 
     my $dbh = $self->{_dbh};
-    $dbh->ping();
+    if (!$dbh->ping())
+    {
+	$dbh = $self->_db_connect();
+    }
 
     my $need = $self->{util}->incoming_prots_to_hash($prots);
 
@@ -362,7 +378,10 @@ sub cdd_lookup_domains
     $return = {};
 
     my $dbh = $self->{_dbh};
-    $dbh->ping();
+    if (!$dbh->ping())
+    {
+	$dbh = $self->_db_connect();
+    }
 
     my $need = $self->{util}->incoming_prots_to_hash($prots);
 

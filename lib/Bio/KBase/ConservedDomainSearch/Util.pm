@@ -49,6 +49,7 @@ sub rpsblast_command
 	       "-query", $in,
 	       "-evalue", $self->{evalue},
 	       "-seg", "no",
+	       "-comp_based_stats", 1,
 	       "-outfmt", 5,
 	       "-db", $self->cdd_data . "/data/Cdd",
 	       "-out", $out);
